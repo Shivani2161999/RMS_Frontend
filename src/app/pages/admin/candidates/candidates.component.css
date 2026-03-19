@@ -1,0 +1,113 @@
+.candidate-container {
+  padding: 20px;
+}
+
+/* HEADER */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.add-btn {
+  background: #2563eb;
+  color: white;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* STATS */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: #fff;
+  padding: 16px;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+
+.card h3 {
+  margin-top: 8px;
+}
+
+.danger {
+  color: red;
+}
+
+/* FILTER */
+.filter {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.filter input,
+.filter select {
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+/* TABLE */
+.table-container {
+  background: white;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px;
+}
+
+thead {
+  background: #f1f5f9;
+}
+
+tr:hover {
+  background: #f9fafb;
+}
+
+/* STATUS COLORS */
+.status {
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: white;
+  font-size: 12px;
+}
+
+.applied { background: #3b82f6; }
+.interview { background: #f59e0b; }
+.hired { background: #10b981; }
+.rejected { background: #ef4444; }
+
+/* ACTION BUTTONS */
+button.view {
+  background: #6366f1;
+  color: white;
+  border: none;
+  padding: 5px 8px;
+  margin-right: 5px;
+  border-radius: 5px;
+}
+
+button.edit {
+  background: #10b981;
+  color: white;
+  border: none;
+  padding: 5px 8px;
+  border-radius: 5px;
+}

@@ -1,0 +1,75 @@
+<div class="candidate-container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <h2>Candidates</h2>
+    <button class="add-btn">+ Add Candidate</button>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="card">
+      <p>Total Candidates</p>
+      <h3>{{stats.total}}</h3>
+    </div>
+    <div class="card">
+      <p>Active</p>
+      <h3>{{stats.active}}</h3>
+    </div>
+    <div class="card">
+      <p>Shortlisted</p>
+      <h3>{{stats.shortlisted}}</h3>
+    </div>
+    <div class="card">
+      <p>Rejected</p>
+      <h3 class="danger">{{stats.rejected}}</h3>
+    </div>
+  </div>
+
+  <!-- FILTER -->
+  <div class="filter">
+    <input type="text" placeholder="Search candidate..." [(ngModel)]="searchText">
+    <select [(ngModel)]="selectedStatus">
+      <option value="">All Status</option>
+      <option value="Applied">Applied</option>
+      <option value="Interview">Interview</option>
+      <option value="Hired">Hired</option>
+      <option value="Rejected">Rejected</option>
+    </select>
+  </div>
+
+  <!-- TABLE -->
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Phone</th>
+          <th>Job Role</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        <tr *ngFor="let c of filteredCandidates()">
+          <td>{{c.name}}</td>
+          <td>{{c.email}}</td>
+          <td>{{c.phone}}</td>
+          <td>{{c.job}}</td>
+          <td>
+            <span class="status" [ngClass]="c.status.toLowerCase()">
+              {{c.status}}
+            </span>
+          </td>
+          <td>
+            <button class="view">View</button>
+            <!-- <button class="edit">Edit</button> -->
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>

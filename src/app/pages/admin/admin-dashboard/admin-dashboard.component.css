@@ -1,0 +1,84 @@
+.dashboard-container {
+  padding: 16px 20px;   /* 🔥 reduced from p-6 */
+}
+
+.dashboard-container h1 {
+  margin-top: 0;        /* remove top gap */
+}
+
+/* GRID FIX */
+.grid {
+  margin-top: 10px;
+}
+
+/* CARD STYLE */
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+}
+
+/* TABLE */
+table {
+  width: 100%;
+}
+
+/* CHART FIX */
+canvas {
+  max-height: 220px;
+}
+
+
+/* CARD GRID FIX */
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  transition: 0.2s ease;
+}
+
+/* HOVER */
+.stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.06);
+}
+
+/* ICON */
+.icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: white;
+  flex-shrink: 0;
+}
+
+/* COLORS */
+.blue { background: #3b82f6; }
+.indigo { background: #6366f1; }
+.orange { background: #f59e0b; }
+.red { background: #ef4444; }
+.green { background: #10b981; }
+.purple { background: #8b5cf6; }
+.success { background: #22c55e; }
+
+/* TEXT */
+.stat-card .text p {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.stat-card .text h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 2px 0 0;
+}

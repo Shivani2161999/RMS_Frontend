@@ -1,0 +1,94 @@
+<div class="p-6 space-y-6">
+
+  <!-- HEADER -->
+  <div>
+    <h1 class="text-2xl font-semibold">Jobs Overview</h1>
+    <p class="text-sm text-gray-500">Manage and track all job openings</p>
+  </div>
+
+  <!-- SEARCH + FILTER -->
+  <div class="flex gap-4 items-center">
+
+    <!-- SEARCH -->
+    <input
+      [(ngModel)]="searchText"
+      (input)="filterJobs()"
+      placeholder="Search jobs..."
+      class="border rounded-lg px-3 py-2 text-sm w-64"
+    />
+
+    <!-- STATUS FILTER -->
+    <select [(ngModel)]="selectedStatus" (change)="filterJobs()"
+      class="border rounded-lg px-3 py-2 text-sm">
+      <option value="">All Status</option>
+      <option value="Open">Open</option>
+      <option value="Closed">Closed</option>
+    </select>
+
+    <!-- DEPARTMENT FILTER -->
+    <select [(ngModel)]="selectedDept" (change)="filterJobs()"
+      class="border rounded-lg px-3 py-2 text-sm">
+      <option value="">All Departments</option>
+      <option value="IT">IT</option>
+      <option value="HR">HR</option>
+      <option value="Sales">Sales</option>
+    </select>
+
+  </div>
+
+  <!-- TABLE -->
+  <div class="bg-white rounded-xl border shadow-sm p-4">
+
+    <h3 class="font-semibold mb-4">All Jobs</h3>
+
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-gray-500 text-left border-b">
+          <th class="py-2">Job ID</th>
+          <th>Title</th>
+          <th>Department</th>
+          <th>Status</th>
+          <th>Openings</th>
+          <th>Applied</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        <tr *ngFor="let job of paginatedJobs" class="border-b">
+          <td class="py-2">{{job.id}}</td>
+          <td>{{job.title}}</td>
+          <td>{{job.department}}</td>
+          <td>
+            <span [ngClass]="{
+              'text-green-600': job.status==='Open',
+              'text-gray-500': job.status==='Closed'
+            }">
+              {{job.status}}
+            </span>
+          </td>
+          <td>{{job.openings}}</td>
+          <td>{{job.applied}}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- PAGINATION -->
+    <div class="flex justify-between items-center mt-4 text-sm">
+
+      <button (click)="prevPage()" [disabled]="currentPage === 1"
+        class="px-3 py-1 border rounded">
+        Prev
+      </button>
+
+      <span>Page {{currentPage}}</span>
+
+      <button (click)="nextPage()" [disabled]="currentPage >= totalPages"
+        class="px-3 py-1 border rounded">
+        Next
+      </button>
+
+    </div>
+
+  </div>
+
+</div>

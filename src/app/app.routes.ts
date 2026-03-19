@@ -11,6 +11,11 @@ import { ApplyJobsComponent } from './pages/candidate/apply-jobs/apply-jobs.comp
 import { CandidateDataComponent } from './pages/candidate/candidate-data/candidate-data.component';
 import { AppliedJobsComponent } from './pages/candidate/applied-jobs/applied-jobs.component';
 import { SelectedJobsComponent } from './pages/candidate/selected-jobs/selected-jobs.component';
+import { AdminComponent } from './pages/admin/admin.component';
+import { AdminDashboardComponent } from './pages/admin/admin-dashboard/admin-dashboard.component';
+import { JobsComponent } from './pages/admin/jobs/jobs.component';
+import { CandidatesComponent } from './pages/admin/candidates/candidates.component';
+
 
 export const routes: Routes = [
   { path: '', component: LandingComponent },
@@ -31,5 +36,15 @@ export const routes: Routes = [
     ]
   },
   { path: 'leadership-dashboard', component: LeadershipDashboardComponent },
+  {
+  path: 'admin',
+  component: AdminComponent,
+  children: [
+    { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
+    { path: 'dashboard', component: AdminDashboardComponent },
+    { path: 'jobs', component: JobsComponent },
+    { path: 'candidates', component: CandidatesComponent }
+  ]
+},
   { path: '**', redirectTo: '' }
 ];

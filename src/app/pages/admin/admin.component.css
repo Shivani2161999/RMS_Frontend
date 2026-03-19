@@ -1,0 +1,38 @@
+/* MAIN LAYOUT */
+:host {
+  display: block;
+  height: 100vh;
+  overflow: hidden; /* prevents full page scroll */
+}
+
+/* WRAPPER */
+.layout {
+  display: flex;
+  height: 100vh;
+}
+
+/* SIDEBAR FIX */
+aside {
+  height: 100vh;
+  position: fixed;   /* 🔥 KEY FIX */
+  top: 0;
+  left: 0;
+  overflow: hidden;  /* no scroll */
+}
+
+.content-area {
+  margin-left: 288px;
+  width: calc(100% - 288px);
+  height: 100vh;
+  overflow-y: auto;
+  background: #f8fafc;
+  transition: all 0.3s ease;
+}
+
+.sidebar-collapsed .content-area {
+  margin-left: 72px;
+  width: calc(100% - 72px);
+}
+.content-area::-webkit-scrollbar {
+  display: none;               /* Chrome */
+}
