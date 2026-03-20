@@ -9,9 +9,11 @@ declare var $: any;
 
 // Role to route mapping — add more roles as needed
 const ROLE_ROUTES: { [key: string]: { route: string; displayName: string } } = {
+  Admin_RMS: { route: '/admin', displayName: 'Admin' },
   Leadership_RMS: { route: '/leadership-dashboard', displayName: 'Leadership' },
   HR_RMS: { route: '/hr-panel', displayName: 'HR' },
   Candidate_RMS: { route: '/candidate', displayName: 'Candidate' },
+  Employee_RMS: { route: '/employee-dashboard', displayName: 'Employee' },
 };
 
 @Component({
@@ -31,6 +33,11 @@ export class LoginComponent {
   loading = false;
   errorMessage = '';
 
+  // Toast
+  showToastMsg = false;
+  toastMessage = '';
+  toastType: 'success' | 'error' = 'success';
+
   constructor(
     private router: Router,
     private auth: AuthService,
@@ -41,117 +48,227 @@ export class LoginComponent {
     this.showPassword = !this.showPassword;
   }
 
-  // Get the redirect route based on user role
-  private getRouteForRole(roles: string[]): { route: string; displayName: string } | null {
+  showToast(message: string, type: 'success' | 'error') {
+    this.toastMessage = message;
+    this.toastType = type;
+    this.showToastMsg = true;
+    setTimeout(() => {
+      this.showToastMsg = false;
+    }, 4000);
+  }
+
+  // Get the redirect route for an employee based on their roles
+  private getEmployeeRouteForRole(roles: string[]): { route: string; displayName: string } | null {
     for (const role of roles) {
       const trimmedRole = role.trim();
+      // Exact match first
       if (ROLE_ROUTES[trimmedRole]) {
         return ROLE_ROUTES[trimmedRole];
+      }
+      // Case-insensitive match
+      const matchKey = Object.keys(ROLE_ROUTES).find(
+        k => k.toLowerCase() === trimmedRole.toLowerCase()
+      );
+      if (matchKey) {
+        return ROLE_ROUTES[matchKey];
+      }
+      // Partial match — role string might contain the key (e.g. DN format like cn=HR_RMS,...)
+      const partialKey = Object.keys(ROLE_ROUTES).find(
+        k => trimmedRole.toLowerCase().includes(k.toLowerCase())
+      );
+      if (partialKey) {
+        return ROLE_ROUTES[partialKey];
       }
     }
     return null;
   }
 
-  // Fetch user roles after authentication and redirect accordingly
-  private async fetchUserRolesAndRedirect(username: string): Promise<void> {
+  // Extract clean role name from Cordys role data which may be a string, DN, or object
+  private extractRoleName(r: any): string {
+    if (typeof r === 'string') {
+      // May be a full DN like "cn=Employee_RMS,cn=organizational roles,..."
+      if (r.startsWith('cn=') || r.includes(',cn=')) {
+        const match = r.match(/^cn=([^,]+)/i);
+        return match ? match[1] : r;
+      }
+      return r;
+    }
+    // Object format — try various known fields
+    return r?.Description || r?.dn || r?.['#text'] || r?.text || r?.cn || String(r);
+  }
+
+  // ─── EMPLOYEE LOGIN FLOW ─────────────────────────────────────────────
+  // Step 1: Cordys SSO auth with empId + password
+  // Step 2: Fetch user roles via GetUserDetails
+  // Step 3: Match role (Leadership_RMS / HR_RMS / Employee_RMS) and redirect
+
+  private employeeLogin(empId: string, password: string): void {
     try {
+      $.cordys.authentication.sso
+        .authenticate(empId, password)
+        .done((resp: any) => {
+          console.log('[EmployeeLogin] Cordys SSO auth success:', resp);
+          sessionStorage.setItem('employeeId', empId);
+          // After Cordys auth, fetch roles and redirect
+          this.fetchEmployeeRolesAndRedirect(empId);
+        })
+        .fail((err: any) => {
+          console.error('[EmployeeLogin] Cordys SSO auth failed:', err);
+          this.loading = false;
+          this.errorMessage = 'The username or password you entered is incorrect.';
+          this.showToast(this.errorMessage, 'error');
+        });
+    } catch (e) {
+      console.error('[EmployeeLogin] Cordys SSO error:', e);
+      this.loading = false;
+      this.errorMessage = 'Authentication service is not available. Please try again later.';
+      this.showToast(this.errorMessage, 'error');
+    }
+  }
+
+  private async fetchEmployeeRolesAndRedirect(empId: string): Promise<void> {
+    try {
+      // Fetch user details from Cordys to get their roles
       const resp: any = await this.heroService.ajax(
         'GetUserDetails',
-        'http://schemas.cordys.com/1.0/ldap',
-        { dn: username }
+        'http://schemas.cordys.com/UserManagement/1.0/Organization',
+        { UserName: empId }
       );
 
-      console.log('GetUserDetails response:', resp);
+      console.log('[EmployeeLogin] GetUserDetails response received. Raw response:', resp);
 
       // Extract roles from response
       let roles: string[] = [];
       const roleData = this.heroService.xmltojson(resp, 'Role');
+      console.log('[EmployeeLogin] GetUserDetails parsed Role data object:', roleData);
+
+      // Helper to extract the text content from a role object
+      const extractRoleText = (r: any): string => {
+        if (typeof r === 'string') return r;
+        if (r?.text) return r.text;
+        if (r?.['#text']) return r['#text'];
+        if (r?.['$t']) return r['$t'];
+        if (r?.Description) return r.Description;
+        return String(r);
+      };
 
       if (roleData) {
         if (Array.isArray(roleData)) {
-          roles = roleData.map((r: any) =>
-            typeof r === 'string' ? r : (r?.Description || r?.['#text'] || r?.text || String(r))
-          );
+          console.log(`[EmployeeLogin] Found ${roleData.length} role(s) to process.`);
+          roles = roleData.map((r: any, index: number) => {
+            const text = extractRoleText(r);
+            console.log(`[EmployeeLogin] Role extracted at index ${index}: '${text}' (from object: ${JSON.stringify(r)})`);
+            return text;
+          });
         } else {
-          roles = [typeof roleData === 'string' ? roleData : (roleData?.Description || roleData?.['#text'] || roleData?.text || String(roleData))];
+          console.log('[EmployeeLogin] Found single role object to process.');
+          const text = extractRoleText(roleData);
+          console.log(`[EmployeeLogin] Single Role extracted: '${text}' (from object: ${JSON.stringify(roleData)})`);
+          roles = [text];
         }
+      } else {
+        console.log('[EmployeeLogin] No "Role" property extracted by xmltojson block.');
       }
 
-      console.log('User roles:', roles);
+      console.log('[EmployeeLogin] Roles after extraction:', roles);
+
+      // Fallback: if roles are empty or just [object Object], scan the full response string
+      if (roles.length === 0 || roles.every(r => r === '[object Object]')) {
+        console.warn('[EmployeeLogin] Role extraction via xmltojson failed. Scanning full response string...');
+        const fullStr = JSON.stringify(resp);
+        const knownRoles = Object.keys(ROLE_ROUTES);
+        roles = knownRoles.filter(role => fullStr.includes(role));
+        console.log('[EmployeeLogin] Roles retrieved via fallback substring scan:', roles);
+      } else {
+        console.log('[EmployeeLogin] Successfully extracted role values via xmltojson.');
+      }
+
+      console.log('[EmployeeLogin] Final matched User roles:', roles);
 
       // Store user info
-      sessionStorage.setItem('displayName', username);
-      sessionStorage.setItem('employeeId', username);
+      sessionStorage.setItem('displayName', empId);
+      sessionStorage.setItem('employeeId', empId);
       sessionStorage.setItem('userRoles', JSON.stringify(roles));
 
-      // Find matching route for the user's role
-      const roleRoute = this.getRouteForRole(roles);
+      // Match against role routes
+      const roleRoute = this.getEmployeeRouteForRole(roles);
+      console.log('[EmployeeLogin] Matched roleRoute:', roleRoute);
 
-      if (roleRoute) {
-        sessionStorage.setItem('userRole', roleRoute.displayName);
-        this.auth.setAuthenticated(true);
-        this.loading = false;
-        this.router.navigate([roleRoute.route]);
-      } else {
-        // No matching role — fallback based on loginType
-        this.auth.setAuthenticated(true);
-        this.loading = false;
-        const fallback = this.loginType === 'candidate' ? '/candidate' : '/leadership-dashboard';
-        console.warn('No matching role found. User roles:', roles, '. Falling back to', fallback);
-        this.router.navigate([fallback]);
-      }
-    } catch (e) {
-      console.error('Failed to fetch user roles:', e);
-      // Still authenticated, redirect based on loginType
       this.auth.setAuthenticated(true);
       this.loading = false;
-      const fallback = this.loginType === 'candidate' ? '/candidate' : '/leadership-dashboard';
-      this.router.navigate([fallback]);
+
+      if (roleRoute) {
+        console.log('[EmployeeLogin] Role matched:', roleRoute.displayName, '→', roleRoute.route);
+        sessionStorage.setItem('userRole', roleRoute.displayName);
+        this.router.navigate([roleRoute.route]);
+      } else {
+        // No matching role — redirect to landing page
+        console.warn('[EmployeeLogin] No matching role found. User roles:', roles, '. Redirecting to /');
+        this.router.navigate(['/']);
+      }
+    } catch (e) {
+      console.error('[EmployeeLogin] Failed to fetch user roles:', e);
+      // Redirect to landing page on error
+      this.loading = false;
+      this.router.navigate(['/']);
     }
   }
 
-  // Perform Cordys SSO authentication
-  private authenticateWithCordys(username: string, password: string): void {
+  // ─── CANDIDATE LOGIN FLOW (UNCHANGED) ────────────────────────────────
+  // Existing candidate flow: Cordys SSO with email + password, then redirect to /candidate
+
+  private candidateLogin(email: string, password: string): void {
     try {
       $.cordys.authentication.sso
-        .authenticate(username, password)
+        .authenticate(email, password)
         .done((resp: any) => {
-          console.log('Cordys SSO authenticate done:', resp);
-          // Store employee ID immediately on successful auth
-          sessionStorage.setItem('employeeId', username);
-          // After successful authentication, fetch user roles to determine redirect
-          this.fetchUserRolesAndRedirect(username);
+          console.log('[CandidateLogin] Cordys SSO auth success:', resp);
+          sessionStorage.setItem('displayName', email);
+          sessionStorage.setItem('candidate_id', email);
+          sessionStorage.setItem('userRole', 'Candidate');
+          this.auth.setAuthenticated(true);
+          this.loading = false;
+          this.router.navigate(['/candidate']);
         })
         .fail((err: any) => {
-          console.error('Cordys SSO authenticate failed:', err);
+          console.error('[CandidateLogin] Cordys SSO auth failed:', err);
           this.loading = false;
-          this.errorMessage = 'Authentication failed. Please check your credentials.';
+          this.errorMessage = 'The username or password you entered is incorrect.';
+          this.showToast(this.errorMessage, 'error');
         });
     } catch (e) {
-      console.error('Cordys SSO error:', e);
+      console.error('[CandidateLogin] Cordys SSO error:', e);
       this.loading = false;
       this.errorMessage = 'Authentication service is not available. Please try again later.';
+      this.showToast(this.errorMessage, 'error');
     }
   }
 
-  // Called when the form is submitted
+  // ─── FORM SUBMISSION ─────────────────────────────────────────────────
   onLogin(): void {
     this.errorMessage = '';
     this.loading = true;
 
-    // Determine login identifier based on login type
-    const username = this.loginType === 'employee' ? this.empId.trim() : this.email.trim();
-
-    // Validate inputs
-    if (!username || !this.password.trim()) {
-      this.loading = false;
-      this.errorMessage = this.loginType === 'employee'
-        ? 'Please enter both Employee ID and password.'
-        : 'Please enter both email and password.';
-      return;
+    if (this.loginType === 'employee') {
+      // Employee login: empId + password → Cordys auth → fetch role → redirect
+      const empId = this.empId.trim();
+      if (!empId || !this.password.trim()) {
+        this.loading = false;
+        this.errorMessage = 'Please enter both Employee ID and password.';
+        this.showToast(this.errorMessage, 'error');
+        return;
+      }
+      this.employeeLogin(empId, this.password);
+    } else {
+      // Candidate login: email + password → Cordys auth → redirect to /candidate
+      const email = this.email.trim();
+      if (!email || !this.password.trim()) {
+        this.loading = false;
+        this.errorMessage = 'Please enter both email and password.';
+        this.showToast(this.errorMessage, 'error');
+        return;
+      }
+      this.candidateLogin(email, this.password);
     }
-
-    // Authenticate with Cordys SSO
-    this.authenticateWithCordys(username, this.password);
   }
 }

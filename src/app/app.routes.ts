@@ -5,27 +5,29 @@ import { SignupComponent } from './pages/signup/signup.component';
 import { CareerComponent } from './pages/career/career.component';
 import { LeadershipDashboardComponent } from './pages/leadership-dashboard/leadership-dashboard.component';
 import { HrPanelComponent } from './pages/hr-panel/hr-panel.component';
+import { AdminPanelComponent } from './pages/admin-panel/admin-panel.component';
+import { AdminGuard } from './guards/admin.guard';
+import { RoleGuard } from './guards/role.guard';
 import { CandidateComponent } from './pages/candidate/candidate.component';
 import { ResumeUploadComponent } from './pages/candidate/resume-upload/resume-upload.component';
 import { ApplyJobsComponent } from './pages/candidate/apply-jobs/apply-jobs.component';
 import { CandidateDataComponent } from './pages/candidate/candidate-data/candidate-data.component';
 import { AppliedJobsComponent } from './pages/candidate/applied-jobs/applied-jobs.component';
 import { SelectedJobsComponent } from './pages/candidate/selected-jobs/selected-jobs.component';
-import { AdminComponent } from './pages/admin/admin.component';
-import { AdminDashboardComponent } from './pages/admin/admin-dashboard/admin-dashboard.component';
-import { JobsComponent } from './pages/admin/jobs/jobs.component';
-import { CandidatesComponent } from './pages/admin/candidates/candidates.component';
-
+import { EmployeeDashboardComponent } from './pages/employee-dashboard/employee-dashboard.component';
 
 export const routes: Routes = [
   { path: '', component: LandingComponent },
   { path: 'login', component: LoginComponent },
   { path: 'signup', component: SignupComponent },
   { path: 'career', component: CareerComponent },
-  { path: 'hr-panel', component: HrPanelComponent },
+  { path: 'hr-panel', component: HrPanelComponent, canActivate: [RoleGuard], data: { roles: ['HR'] } },
+  { path: 'admin', component: AdminPanelComponent, canActivate: [AdminGuard] },
   {
     path: 'candidate',
     component: CandidateComponent,
+    canActivate: [RoleGuard],
+    data: { roles: ['Candidate', 'Employee'] },
     children: [
       { path: '', redirectTo: 'apply-jobs', pathMatch: 'full' },
       { path: 'resume-upload', component: ResumeUploadComponent },
@@ -36,15 +38,6 @@ export const routes: Routes = [
     ]
   },
   { path: 'leadership-dashboard', component: LeadershipDashboardComponent },
-  {
-  path: 'admin',
-  component: AdminComponent,
-  children: [
-    { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
-    { path: 'dashboard', component: AdminDashboardComponent },
-    { path: 'jobs', component: JobsComponent },
-    { path: 'candidates', component: CandidatesComponent }
-  ]
-},
+  { path: 'employee-dashboard', component: EmployeeDashboardComponent },
   { path: '**', redirectTo: '' }
 ];
