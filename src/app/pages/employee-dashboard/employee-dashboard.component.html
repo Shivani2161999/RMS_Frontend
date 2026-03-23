@@ -52,9 +52,6 @@
         <p class="page-subtitle">Adnate IT Solutions — Employee Portal</p>
       </div>
       <div class="header-actions">
-        <div class="user-avatar">
-          <span>{{ loggedInUserInitial }}</span>
-        </div>
       </div>
     </header>
 
@@ -95,6 +92,11 @@
               </div>
             </div>
             <span class="round-badge">{{ req.round || 'Interview' }}</span>
+          </div>
+          <!-- Delegated by info -->
+          <div class="delegated-by-badge" *ngIf="req.delegated_by">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:14px;height:14px"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
+            <span>Delegated by: <strong>{{ req.delegated_by }}</strong></span>
           </div>
 
           <div class="request-job-info">
@@ -169,6 +171,11 @@
             <span class="job-title-text">{{ iv.job_title }}</span>
             <span class="id-badge small">{{ iv.jr_id }}</span>
             <span class="round-badge">{{ iv.round }}</span>
+          </div>
+          <!-- Delegated by info -->
+          <div class="delegated-by-badge" *ngIf="iv.delegated_by">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:14px;height:14px"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
+            <span>Delegated by: <strong>{{ iv.delegated_by }}</strong></span>
           </div>
 
           <div class="interview-schedule-row">
@@ -438,8 +445,8 @@
           </div>
         </div>
         <textarea class="feedback-textarea" [(ngModel)]="feedbackText" placeholder="Write your feedback about the candidate…" rows="4"></textarea>
-        <button class="btn-primary" (click)="submitFeedback()" [disabled]="isSubmittingFeedback">
-          {{ isSubmittingFeedback ? 'Submitting…' : 'Submit Feedback' }}
+        <button class="btn-primary" (click)="submitFeedback()" [disabled]="isSubmittingFeedback || selectedInterview?.feedback">
+          {{ isSubmittingFeedback ? 'Submitting…' : (selectedInterview?.feedback ? 'Feedback Submitted' : 'Submit Feedback') }}
         </button>
       </div>
     </div>

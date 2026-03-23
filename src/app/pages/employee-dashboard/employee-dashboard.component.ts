@@ -11,6 +11,7 @@ interface InterviewRequest {
   interviewer_name: string;
   feedback: string;
   rating: number;
+  task_id: string;
   // Enriched data
   candidate_name: string;
   candidate_email: string;
@@ -30,6 +31,9 @@ interface InterviewRequest {
   meeting_link: string;
   interview_status: string;
   accepted: boolean;
+  delegated_by: string;
+  raw_panel: any;
+  raw_interview: any;
 }
 
 interface Referral {
@@ -102,28 +106,45 @@ export class EmployeeDashboardComponent implements OnInit {
     this.isLoading = true;
     this.errorMessage = '';
     try {
-      const [panels, interviews, candidates, jobs, referrals, employees] = await Promise.all([
-        this.empService.getInterviewPanelForInterviewer(this.loggedInEmployeeId),
+      // Step 1: Load employees first to resolve the actual employee_id
+      const [employees, interviews, candidates, jobs] = await Promise.all([
+        this.empService.getEmployees(),
         this.empService.getAllInterviews(),
         this.empService.getAllCandidates(),
-        this.empService.getAllJobRequisitions(),
-        this.empService.getMyReferrals(this.loggedInEmployeeId),
-        this.empService.getEmployees()
+        this.empService.getAllJobRequisitions()
       ]);
 
       this.allEmployees = employees;
 
-      // Resolve logged-in user profile
+      // Resolve logged-in user profile — match by employee_id, email, or employee_name
+      const loginId = this.loggedInEmployeeId.toLowerCase();
       const me = employees.find((e: any) =>
-        e.employee_id?.toLowerCase() === this.loggedInEmployeeId.toLowerCase() ||
-        e.email?.toLowerCase() === this.loggedInEmployeeId.toLowerCase()
+        (e.employee_id || '').toLowerCase() === loginId ||
+        (e.email || '').toLowerCase() === loginId ||
+        (e.employee_name || '').toLowerCase() === loginId
       );
       if (me) {
         this.loggedInUserName = me.employee_name || 'Employee';
         this.loggedInUserInitial = (me.employee_name || 'E').charAt(0).toUpperCase();
         this.loggedInUserRole = me.designation || me.role || 'Employee';
         this.employeeProfile = me;
+        // Use the actual employee_id from DB for all further queries
+        this.loggedInEmployeeId = me.employee_id;
+        console.log('[EmployeeDashboard] Resolved employee_id:', this.loggedInEmployeeId);
+      } else {
+        console.warn('[EmployeeDashboard] Could not resolve employee for loginId:', this.loggedInEmployeeId);
       }
+
+      // Step 2: Now load panels and referrals with the resolved employee_id
+      const [panels, referrals] = await Promise.all([
+        this.empService.getInterviewPanelForInterviewer(this.loggedInEmployeeId),
+        this.empService.getMyReferrals(this.loggedInEmployeeId)
+      ]);
+
+      console.log('[EmployeeDashboard] loggedInEmployeeId:', this.loggedInEmployeeId);
+      console.log('[EmployeeDashboard] panels returned:', panels.length, panels);
+      console.log('[EmployeeDashboard] interviews returned:', interviews.length);
+      console.log('[EmployeeDashboard] candidates returned:', candidates.length);
 
       // Build enriched interview requests
       const enrichedPanels: InterviewRequest[] = panels.map((p: any) => {
@@ -131,8 +152,12 @@ export class EmployeeDashboardComponent implements OnInit {
         const candidate = candidates.find((c: any) => c.candidate_id === interview.candidate_id) || {};
         const job = jobs.find((j: any) => j.jr_id === interview.jr_id) || {};
 
-        // Determine if accepted: if feedback exists or a temp field marks it
-        const accepted = !!(p.feedback || p.temp1 === 'ACCEPTED');
+        // Determine status from temp1 field
+        const temp1 = (p.temp1 || '').toUpperCase();
+        const accepted = temp1 === 'ACCEPTED';
+        const delegated = temp1 === 'DELEGATED';
+
+        console.log('[EmployeeDashboard] Panel:', p.panel_id, 'temp1:', p.temp1, '-> accepted:', accepted, 'delegated:', delegated);
 
         return {
           panel_id: p.panel_id || '',
@@ -141,6 +166,7 @@ export class EmployeeDashboardComponent implements OnInit {
           interviewer_name: p.interviewer_name || '',
           feedback: p.feedback || '',
           rating: parseInt(p.rating, 10) || 0,
+          task_id: p.task_id || '',
           candidate_name: candidate.name || '',
           candidate_email: candidate.email || '',
           candidate_id: candidate.candidate_id || interview.candidate_id || '',
@@ -158,13 +184,16 @@ export class EmployeeDashboardComponent implements OnInit {
           scheduled_time: interview.scheduled_time || '',
           meeting_link: interview.meeting_link || '',
           interview_status: interview.status || '',
-          accepted
-        };
+          accepted,
+          _delegated: delegated
+        } as any;
       });
 
-      // Separate pending vs accepted
-      this.interviewRequests = enrichedPanels.filter(r => !r.accepted);
+      // Separate pending vs accepted (ignore delegated)
+      this.interviewRequests = enrichedPanels.filter(r => !r.accepted && !(r as any)._delegated);
       this.myInterviews = enrichedPanels.filter(r => r.accepted);
+      console.log('[EmployeeDashboard] Interview Requests (pending):', this.interviewRequests.length);
+      console.log('[EmployeeDashboard] My Interviews (accepted):', this.myInterviews.length);
 
       // Build enriched referrals
       this.referrals = referrals.map((r: any) => {
@@ -200,8 +229,18 @@ export class EmployeeDashboardComponent implements OnInit {
   // ─── Accept Interview Request ───
   async acceptRequest(req: InterviewRequest): Promise<void> {
     try {
-      const oldData = { panel_id: req.panel_id, interview_id: req.interview_id, interviewer_id: req.interviewer_id };
-      const newData = { ...oldData, interviewer_name: req.interviewer_name, temp1: 'ACCEPTED' };
+      const oldData = {
+        panel_id: req.panel_id,
+        interview_id: req.interview_id,
+        interviewer_id: req.interviewer_id
+      };
+      const newData = {
+        panel_id: req.panel_id,
+        interview_id: req.interview_id,
+        interviewer_id: req.interviewer_id,
+        interviewer_name: req.interviewer_name,
+        temp1: 'ACCEPTED'
+      };
       await this.empService.updateInterviewPanel(oldData, newData);
 
       // Move from requests to interviews locally
@@ -239,28 +278,38 @@ export class EmployeeDashboardComponent implements OnInit {
 
     this.isDelegating = true;
     try {
-      await this.empService.createDelegation({
-        original_interviewer_id: this.loggedInEmployeeId,
-        delegate_interviewer_id: this.delegateEmployeeId,
-        start_date: this.delegatingRequest.scheduled_date || new Date().toISOString().split('T')[0],
-        end_date: this.delegatingRequest.scheduled_date || new Date().toISOString().split('T')[0],
-        reason: this.delegateReason
-      });
-
-      // Update the panel to the delegate
+      // 1. Mark the original interviewer's row as DELEGATED
       const oldData = {
         panel_id: this.delegatingRequest.panel_id,
         interview_id: this.delegatingRequest.interview_id,
         interviewer_id: this.delegatingRequest.interviewer_id
       };
-      const delegateEmp = this.allEmployees.find(e => e.employee_id === this.delegateEmployeeId);
       const newData = {
-        ...oldData,
-        interviewer_id: this.delegateEmployeeId,
-        interviewer_name: delegateEmp?.employee_name || '',
+        panel_id: this.delegatingRequest.panel_id,
+        interview_id: this.delegatingRequest.interview_id,
+        interviewer_id: this.delegatingRequest.interviewer_id,
+        interviewer_name: this.delegatingRequest.interviewer_name,
         temp1: 'DELEGATED'
       };
       await this.empService.updateInterviewPanel(oldData, newData);
+
+      // 2. Create a new entry for the delegate employee with temp1 = PENDING
+      const delegateEmp = this.allEmployees.find(e => e.employee_id === this.delegateEmployeeId);
+      await this.empService.createInterviewPanelEntry({
+        interview_id: this.delegatingRequest.interview_id,
+        interviewer_id: this.delegateEmployeeId,
+        interviewer_name: delegateEmp?.employee_name || '',
+        temp1: 'PENDING'
+      });
+
+      // 3. Insert record into interviewer_delegation table
+      await this.empService.createDelegation({
+        original_interviewer_id: this.loggedInEmployeeId,
+        delegate_interviewer_id: this.delegateEmployeeId,
+        start_date: this.delegatingRequest.scheduled_date || new Date().toISOString().split('T')[0],
+        end_date: this.delegatingRequest.scheduled_date || new Date().toISOString().split('T')[0],
+        reason: this.delegateReason || 'Delegated via dashboard'
+      });
 
       // Remove from local list
       this.interviewRequests = this.interviewRequests.filter(r => r.panel_id !== this.delegatingRequest!.panel_id);
@@ -287,9 +336,18 @@ export class EmployeeDashboardComponent implements OnInit {
   // ─── Submit Feedback ───
   async submitFeedback(): Promise<void> {
     if (!this.selectedInterview) return;
+    if (this.feedbackRating < 1 || this.feedbackRating > 5) {
+      alert('Please provide a rating between 1 and 5.');
+      return;
+    }
+    if (!this.feedbackText.trim()) {
+      alert('Please provide your feedback.');
+      return;
+    }
+
     this.isSubmittingFeedback = true;
     try {
-      const oldData = {
+      const oldData = this.selectedInterview.raw_panel || {
         panel_id: this.selectedInterview.panel_id,
         interview_id: this.selectedInterview.interview_id,
         interviewer_id: this.selectedInterview.interviewer_id
@@ -299,14 +357,16 @@ export class EmployeeDashboardComponent implements OnInit {
         interviewer_name: this.selectedInterview.interviewer_name,
         feedback: this.feedbackText,
         rating: this.feedbackRating,
-        temp1: 'ACCEPTED'
+        temp1: 'accepted'
       };
       await this.empService.updateInterviewPanel(oldData, newData);
 
       // Update local state
       this.selectedInterview.feedback = this.feedbackText;
       this.selectedInterview.rating = this.feedbackRating;
-      alert('Feedback submitted successfully!');
+
+      // Close the side panel after successful submission
+      this.closeInterviewDetail();
     } catch (error) {
       console.error('Failed to submit feedback:', error);
       alert('Failed to submit feedback. Please try again.');

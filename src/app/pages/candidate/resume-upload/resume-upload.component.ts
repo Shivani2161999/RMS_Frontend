@@ -1,210 +1,510 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { HeroService } from '../../../hero.service';
 import { Router } from '@angular/router';
+import { environment } from '../../../../environments/environment';
 
 @Component({
   selector: 'app-resume-upload',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   templateUrl: './resume-upload.component.html',
   styleUrls: ['./resume-upload.component.css']
 })
-export class ResumeUploadComponent {
+export class ResumeUploadComponent implements OnInit {
+
+  // --- State flags ---
   isParsing = false;
   isSaving = false;
-  parsedData: any = null;
-  files: { name: string; size: string; date: string; type: string, fileObj?: File }[] = [];
+  isApproved = false;
   isDragging = false;
+
+  // --- Toast / Status ---
+  statusMessage = '';
+  statusType: 'success' | 'error' | 'info' = 'info';
+  showStatus = false;
+
+  // --- Data ---
+  parsedData: any = null;
+  selectedFile: File | null = null;
+  selectedFileName = '';
+  selectedFileSize = '';
+  selectedFileType = '';
+
+  // --- Persisted resume info (from DB) ---
+  resumeFileName = '';
+
+  // --- Stored details toggle ---
+  showStoredDetails = false;
+  isLoadingStoredDetails = false;
+  storedCandidateFields: { label: string; value: string }[] = [];
+
+  // --- Step 6: Final output ---
+  finalCandidate: any = null;
+  finalCandidateFields: { label: string; value: string }[] = [];
+
+  // --- Step Progress ---
+  currentStep = 0;
+  workflowSteps = ['Upload', 'Parse', 'Review', 'Upload to Server', 'Save to DB', 'Done'];
+
+  // --- Constants ---
+  private readonly DOWNLOAD_BASE = 'http://43.242.214.239:81/home/training2025/MAHINDRA_UPLOADS/Intern_Uploads';
 
   constructor(private heroService: HeroService, private router: Router) {}
 
+  // =====================================================================
+  //  LIFECYCLE
+  // =====================================================================
   ngOnInit(): void {
     const candidateId = sessionStorage.getItem('candidate_id');
-    console.log('Current Session Candidate ID:', candidateId);
-    if (!candidateId) {
-       console.warn('No candidate_id found in session. Saving will be disabled.');
+    if (candidateId) {
+      this.loadExistingResume(candidateId);
+    } else {
+      console.warn('No candidate_id in session.');
     }
   }
 
-  onDragOver(event: DragEvent): void {
-    event.preventDefault();
-    this.isDragging = true;
-  }
-
-  onDragLeave(): void {
-    this.isDragging = false;
-  }
-
-  onDrop(event: DragEvent): void {
-    event.preventDefault();
-    this.isDragging = false;
-    const droppedFiles = event.dataTransfer?.files;
-    if (droppedFiles && droppedFiles.length > 0) {
-      this.handleFile(droppedFiles[0]);
+  private async loadExistingResume(candidateId: string) {
+    try {
+      const resp = await this.heroService.getCandidateObject(candidateId);
+      const candidate = this.heroService.xmltojson(resp, 'candidate');
+      if (candidate) {
+        const path: string = this.extractTextField(candidate.resume_path);
+        if (path) {
+          this.resumeFileName = this.bareFileName(path);
+        }
+      }
+    } catch (err) {
+      console.error('Could not load existing resume:', err);
     }
   }
 
-  onFileSelect(event: Event): void {
-    const inputElement = event.target as HTMLInputElement;
-    if (inputElement.files && inputElement.files.length > 0) {
-      this.handleFile(inputElement.files[0]);
+  // =====================================================================
+  //  TOGGLE STORED CANDIDATE DETAILS
+  // =====================================================================
+  async toggleStoredDetails() {
+    this.showStoredDetails = !this.showStoredDetails;
+
+    // If opening and we haven't loaded yet (or want to refresh), fetch from DB
+    if (this.showStoredDetails && this.storedCandidateFields.length === 0) {
+      const candidateId = sessionStorage.getItem('candidate_id');
+      if (!candidateId) return;
+
+      this.isLoadingStoredDetails = true;
+      try {
+        const resp = await this.heroService.getCandidateObject(candidateId);
+        const candidate = this.heroService.xmltojson(resp, 'candidate');
+        if (candidate) {
+          const ext = (field: any): string => {
+            if (!field) return '';
+            if (typeof field === 'string') return field;
+            return field.text || field['#text'] || '';
+          };
+          this.storedCandidateFields = [
+            { label: 'Candidate ID', value: ext(candidate.candidate_id) },
+            { label: 'Name',         value: ext(candidate.name) },
+            { label: 'Email',        value: ext(candidate.email) },
+            { label: 'Phone',        value: ext(candidate.phone) },
+            { label: 'Skills',       value: ext(candidate.skills) },
+            { label: 'Experience',   value: ext(candidate.experience) ? ext(candidate.experience) + ' years' : '' },
+            { label: 'Education',    value: ext(candidate.education) },
+            { label: 'Resume File',  value: ext(candidate.resume_path) }
+          ];
+        }
+      } catch (err) {
+        console.error('Failed to load candidate details:', err);
+      } finally {
+        this.isLoadingStoredDetails = false;
+      }
     }
   }
 
-  removeFile(index: number): void {
-    this.files.splice(index, 1);
+  // =====================================================================
+  //  FILE SELECTION
+  // =====================================================================
+  onDragOver(e: DragEvent) { e.preventDefault(); this.isDragging = true; }
+  onDragLeave() { this.isDragging = false; }
+
+  onDrop(e: DragEvent) {
+    e.preventDefault(); this.isDragging = false;
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) this.handleFile(files[0]);
+  }
+
+  onFileSelect(e: Event) {
+    const el = e.target as HTMLInputElement;
+    if (el.files && el.files.length > 0) this.handleFile(el.files[0]);
+  }
+
+  removeFile() {
+    this.selectedFile = null;
+    this.selectedFileName = '';
+    this.parsedData = null;
+    this.isApproved = false;
+    this.finalCandidate = null;
+    this.finalCandidateFields = [];
+    this.currentStep = 0;
   }
 
   private handleFile(file: File) {
-    const fileSize = (file.size / 1024).toFixed(2) + ' KB';
-    let fileType = file.name.split('.').pop()?.toUpperCase() || 'UNKNOWN';
-    if (file.type === 'application/pdf') {
-      fileType = 'PDF';
-    } else if (file.name.endsWith('.doc') || file.name.endsWith('.docx')) {
-      fileType = 'DOCX';
-    }
+    this.selectedFile = file;
+    this.selectedFileName = file.name;
+    this.selectedFileSize = (file.size / 1024).toFixed(2) + ' KB';
+    this.selectedFileType = file.name.split('.').pop()?.toUpperCase() || 'UNKNOWN';
+    this.isApproved = false;
+    this.finalCandidate = null;
+    this.finalCandidateFields = [];
+    this.currentStep = 0;
+    this.showToast('File selected: ' + file.name, 'info');
 
-    this.files.unshift({
-      name: file.name,
-      size: fileSize,
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-      type: fileType,
-      fileObj: file
-    });
-
-    if (fileType === 'PDF') {
-      this.parseResumeWithPDFPackage(file);
-    }
+    this.parseResumeWithApyHub(file);
   }
 
-  async parseResumeWithPDFPackage(file: File) {
+  // =====================================================================
+  //  RESUME PARSING via ApyHub SharpAPI  (Step 1)
+  // =====================================================================
+  async parseResumeWithApyHub(file: File) {
     this.isParsing = true;
     this.parsedData = null;
+    this.currentStep = 1;
+
+    const apiKey = (environment as any).apyhubApiKey;
+    if (!apiKey) {
+      this.showToast('ApyHub API key not configured.', 'error');
+      this.isParsing = false;
+      return;
+    }
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      // Use dynamic import for pdfjs-dist because it might not be fully ES-compatible depending on env
-      const pdfjsLib = await (import('pdfjs-dist') as any);
-      // Set worker to CDN for version 3.11.174 (compatible with ES2022 and below)
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
-
-      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-      const pdf = await loadingTask.promise;
+      this.showToast('Submitting resume to ApyHub AI…', 'info');
       
-      let fullText = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        fullText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // Step 1: Submit file to API
+      const submitResponse = await fetch('https://api.apyhub.com/sharpapi/api/v1/hr/parse_resume', {
+        method: 'POST',
+        headers: {
+          'apy-token': apiKey
+        },
+        body: formData
+      });
+
+      if (!submitResponse.ok) {
+        throw new Error('Failed to submit resume for parsing.');
       }
 
-      console.log('Resulting text from PDF:', fullText);
-      this.extractFieldsFromText(fullText);
-    } catch (error: any) {
-      console.error('Error parsing PDF:', error);
-      alert('Failed to parse the PDF. ' + (error.message || error));
+      const submitData = await submitResponse.json();
+      const statusUrl = submitData.status_url;
+
+      if (!statusUrl) {
+         throw new Error('Invalid response from parsing API.');
+      }
+
+      this.showToast('Resume submitted successfully. Waiting for AI processing...', 'info');
+
+      // Step 2: Poll status until complete
+      let jobResult: any = null;
+      let attempts = 0;
+
+      // Extract Job ID to proxy through local backend and bypass CORS
+      const parts = statusUrl.split('/');
+      const jobId = parts[parts.length - 1];
+      const proxyUrl = `http://localhost:3001/api/apyhub/status/${jobId}`;
+      
+      while (attempts < 30) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Fetch via Node backend
+        const statusResponse = await fetch(proxyUrl);
+        
+        if (!statusResponse.ok) continue;
+        
+        const statusData = await statusResponse.json();
+        const status = statusData.data?.attributes?.status;
+        
+        if (status === 'success') {
+           jobResult = statusData.data.attributes.result;
+           break;
+        } else if (status === 'failed') {
+           throw new Error('Parsing job failed at server.');
+        }
+        
+        attempts++;
+      }
+
+      if (!jobResult) {
+        throw new Error('Parsing timed out.');
+      }
+
+      // Map ApyHub result to our format exactly based on SharpAPI signature
+      let name = jobResult.candidate_name || null;
+      let email = jobResult.candidate_email || null;
+      let phone = jobResult.candidate_phone || null;
+      let experienceNum = jobResult.years_of_experience || 0;
+
+      // Extract skills from all positions and flatten into a unique list
+      let allSkills = new Set<string>();
+      if (Array.isArray(jobResult.positions)) {
+        jobResult.positions.forEach((pos: any) => {
+          if (Array.isArray(pos.skills)) {
+            pos.skills.forEach((skill: string) => allSkills.add(skill));
+          }
+        });
+      }
+      // If skills array exists at the root (just in case), add those too
+      if (Array.isArray(jobResult.skills)) {
+        jobResult.skills.forEach((skill: any) => {
+          if (typeof skill === 'string') allSkills.add(skill);
+        });
+      }
+      let skills = allSkills.size > 0 ? Array.from(allSkills).join(', ') : null;
+
+      // Extract Education
+      let education = null;
+      if (Array.isArray(jobResult.education_qualifications) && jobResult.education_qualifications.length > 0) {
+        const edu = jobResult.education_qualifications[0];
+        const degree = edu.degree_type || '';
+        const spec = edu.specialization_subjects ? ` in ${edu.specialization_subjects}` : '';
+        const school = edu.school_name || '';
+        education = `${degree}${spec} - ${school}`.trim();
+        if (education.startsWith('- ')) education = education.substring(2);
+      } else if (Array.isArray(jobResult.education) && jobResult.education.length > 0) {
+        // Fallback for different version
+        const edu = jobResult.education[0];
+        education = `${edu.degree || edu.title || ''} - ${edu.institution_name || edu.school || ''}`.trim();
+      }
+
+      // Robust fallback search for Email and Phone if they were blank
+      const extractRegex = (obj: any, regex: RegExp): string | null => {
+        if (!obj) return null;
+        if (typeof obj === 'string') {
+          const m = obj.match(regex);
+          if (m) return m[0];
+        }
+        if (typeof obj === 'object') {
+          for (const k of Object.keys(obj)) {
+            const found = extractRegex(obj[k], regex);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      if (!email) email = extractRegex(jobResult, /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (!phone) phone = extractRegex(jobResult, /\+?\d[\d\s\-\(\)]{8,}/);
+
+      const mappedData = {
+        name: name,
+        email: email,
+        phone: phone ? String(phone) : null,
+        skills: skills,
+        experience: experienceNum,
+        education: education
+      };
+
+      this.parsedData = this.normalizeNulls(mappedData);
+      this.currentStep = 2; // Advance to review step
+      this.showToast('Resume parsed successfully with ApyHub AI!', 'success');
+
+    } catch (err: any) {
+      console.error('ApyHub parse error:', err);
+      this.showToast('Failed to parse Resume: ' + (err.message || err), 'error');
+      // Fallback
+      this.parsedData = { name: null, email: null, phone: null, skills: null, experience: null, education: null };
+      this.currentStep = 2;
+      this.isApproved = false;
     } finally {
       this.isParsing = false;
     }
   }
 
-  private extractFieldsFromText(text: string) {
-    // Basic Regex Extractor
-    const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-    const phoneMatch = text.match(/[\d]{3}[- .]?[\d]{3}[- .]?[\d]{4}/) || text.match(/\+?\d[\d\s\-\(\)]{8,}/);
-    
-    // Improved Name Extraction: Take the first substantial line (ignoring typical headers)
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
-    let name = 'N/A';
-    for (const line of lines.slice(0, 5)) {
-       // Ignore common non-name headers
-       if (!/resume|curriculum|vitae|profile|about|candidate|summary/i.test(line)) {
-          name = line;
-          break;
-       }
-    }
-
-    // Simple keyword extraction for other fields
-    let skills = 'N/A';
-    let education = 'N/A';
-    let experienceNum = 0;
-
-    const lowerText = text.toLowerCase();
-    
-    // Skills heuristic: Look for Skill sections
-    const skillKeywordIdx = lowerText.indexOf('skills');
-    if (skillKeywordIdx !== -1) {
-       skills = text.substring(skillKeywordIdx + 6, skillKeywordIdx + 500).split('\n')[0].substring(0, 499);
-       // Remove leading colons or bullets
-       skills = skills.replace(/^[:\-·\s]+/, '').trim();
-    }
-
-    // Experience: Support decimals with comma (e.g. 5,5 years) or dots
-    const expKeywordIdx = lowerText.indexOf('experience');
-    if (expKeywordIdx !== -1) {
-       const nearExp = text.substring(expKeywordIdx - 50, expKeywordIdx + 150);
-       // Matches digits followed by optional comma/dot and more digits (e.g., 5.5, 5,5)
-       const yearMatch = nearExp.match(/(\d+[\.,]?\d*)\s*(year|yr|exp)/i);
-       if (yearMatch) {
-          const val = yearMatch[1].replace(',', '.');
-          experienceNum = Math.round(parseFloat(val));
-       }
-    }
-
-    const eduKeywordIdx = lowerText.indexOf('education');
-    if (eduKeywordIdx !== -1) {
-       education = text.substring(eduKeywordIdx + 9, eduKeywordIdx + 250).split('\n')[0].substring(0, 254);
-       education = education.replace(/^[:\-·\s]+/, '').trim();
-    }
-
-    this.parsedData = {
-      name: name.substring(0, 254),
-      email: emailMatch ? emailMatch[0].substring(0, 254) : 'N/A',
-      phone: phoneMatch ? phoneMatch[0].substring(0, 19) : 'N/A',
-      skills: skills,
-      experience: experienceNum,
-      education: education
-    };
-    
-    console.log('Locally extracted data (Refined):', this.parsedData);
+  // =====================================================================
+  //  DOWNLOAD URL
+  // =====================================================================
+  getResumeDownloadUrl(): string {
+    if (!this.resumeFileName) return '#';
+    return `${this.DOWNLOAD_BASE}/${this.resumeFileName}`;
   }
 
-  saveToProfile() {
-    if (!this.parsedData || this.files.length === 0) return;
-    
+  // =====================================================================
+  //  MAIN FLOW: UPLOAD → SAVE → FETCH  (Steps 3, 4, 5)
+  // =====================================================================
+  async processUploadAndSave() {
+    if (!this.selectedFile || !this.parsedData) {
+      this.showToast('Please upload a resume first.', 'error'); return;
+    }
+    if (!this.isApproved) {
+      this.showToast('Please approve the parsed details before saving.', 'error'); return;
+    }
     const candidateId = sessionStorage.getItem('candidate_id');
     if (!candidateId) {
-      alert('You must be logged in to save to your profile. Please login and try again.');
-      return;
+      this.showToast('You must be logged in. Please login and try again.', 'error'); return;
     }
 
     this.isSaving = true;
-    
-    // Construct resume_path: UploadDocuments + FileName
-    const fileName = this.files[0]?.name || 'resume.pdf';
-    const resumePath = 'UploadDocuments' + fileName;
+    this.showToast('Uploading resume to server…', 'info');
 
-    const fieldsToUpdate: any = {
-      name: this.parsedData.name !== 'N/A' ? this.parsedData.name : '',
-      phone: this.parsedData.phone !== 'N/A' ? this.parsedData.phone : '',
-      skills: this.parsedData.skills !== 'N/A' ? this.parsedData.skills : '',
-      experience: this.parsedData.experience, // Matches INT column
-      education: this.parsedData.education !== 'N/A' ? this.parsedData.education : '',
-      resume_path: resumePath
+    try {
+      // --- Step 3: Convert to Base64 and upload ---
+      this.currentStep = 3;
+      const base64 = await this.fileToBase64(this.selectedFile);
+      console.log(`Uploading: ${this.selectedFile.name} (${this.selectedFile.size} bytes, base64 len=${base64.length})`);
+
+      const uploadResp = await this.heroService.uploadDocumentsRMS(this.selectedFile.name, base64);
+      console.log('Upload response (XMLDocument):', uploadResp);
+
+      // Extract path from the XML Document response
+      let serverPath = '';
+      if (uploadResp instanceof Document) {
+        // Try to find the UploadDocuments_RMS element text
+        const el = uploadResp.getElementsByTagName('UploadDocuments_RMS')[0];
+        if (el) serverPath = el.textContent || '';
+      }
+
+      // Use the server path if found, otherwise fall back to original filename
+      if (serverPath) {
+        this.resumeFileName = this.bareFileName(serverPath);
+      } else {
+        console.warn('Could not extract path from response, using original filename.');
+        this.resumeFileName = this.selectedFile.name;
+      }
+
+      console.log('Resume file name:', this.resumeFileName);
+      this.showToast('File uploaded! Saving to profile…', 'info');
+
+      // --- Step 4: Save resume_path + parsed fields ---
+      this.currentStep = 4;
+      const fields: any = {
+        name:        this.parsedData.name || '',
+        phone:       this.parsedData.phone || '',
+        skills:      this.parsedData.skills || '',
+        experience:  this.parsedData.experience ?? 0,
+        education:   this.parsedData.education || '',
+        resume_path: this.resumeFileName
+      };
+      await this.heroService.updateCandidate(candidateId, fields);
+
+      // --- Step 5: Fetch updated candidate to verify ---
+      const freshResp = await this.heroService.getCandidateObject(candidateId);
+      console.log('Verified candidate:', freshResp);
+
+      // Build the final candidate object for Step 6
+      const candidateObj = this.heroService.xmltojson(freshResp, 'candidate');
+      this.buildFinalOutput(candidateObj);
+
+      // --- Step 6: Done ---
+      this.currentStep = 5;
+      this.showToast('Resume uploaded and saved successfully!', 'success');
+
+      // Reload the page after a short delay so the user sees the success toast
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+
+    } catch (err: any) {
+      console.error('Upload/save error:', err);
+      this.showToast('Error: ' + (err.message || 'Unknown error'), 'error');
+    } finally {
+      this.isSaving = false;
+    }
+  }
+
+  // =====================================================================
+  //  STEP 6: Build Final Output
+  // =====================================================================
+  private buildFinalOutput(candidate: any) {
+    if (!candidate) {
+      this.finalCandidate = null;
+      return;
+    }
+
+    this.finalCandidate = candidate;
+
+    const ext = (field: any): string => {
+      if (!field) return '';
+      if (typeof field === 'string') return field;
+      return field.text || field['#text'] || '';
     };
 
-    this.heroService.updateCandidate(candidateId, fieldsToUpdate)
-      .then(() => {
-        alert('Resume information saved to your profile successfully!');
-        this.router.navigate(['/candidate/candidate-data']);
-      })
-      .catch((err) => {
-        console.error('Error saving to profile:', err);
-        alert('Failed to save information to profile. Please try again.');
-      })
-      .finally(() => {
-        this.isSaving = false;
-      });
+    this.finalCandidateFields = [
+      { label: 'Candidate ID', value: ext(candidate.candidate_id) },
+      { label: 'Name',         value: ext(candidate.name) },
+      { label: 'Email',        value: ext(candidate.email) },
+      { label: 'Phone',        value: ext(candidate.phone) },
+      { label: 'Skills',       value: ext(candidate.skills) },
+      { label: 'Experience',   value: ext(candidate.experience) ? ext(candidate.experience) + ' years' : '' },
+      { label: 'Education',    value: ext(candidate.education) },
+      { label: 'Resume File',  value: ext(candidate.resume_path) }
+    ];
+  }
+
+  // =====================================================================
+  //  RESET WORKFLOW (allow re-upload)
+  // =====================================================================
+  resetWorkflow() {
+    this.finalCandidate = null;
+    this.finalCandidateFields = [];
+    this.currentStep = 0;
+    this.parsedData = null;
+    this.selectedFile = null;
+    this.selectedFileName = '';
+    this.isApproved = false;
+  }
+
+  // =====================================================================
+  //  TOAST NOTIFICATIONS
+  // =====================================================================
+  showToast(message: string, type: 'success' | 'error' | 'info') {
+    this.statusMessage = message;
+    this.statusType = type;
+    this.showStatus = true;
+
+    if (type !== 'info' || !this.isSaving) {
+      setTimeout(() => { this.showStatus = false; }, 5000);
+    }
+  }
+
+  dismissToast() {
+    this.showStatus = false;
+  }
+
+  // =====================================================================
+  //  UTILITIES
+  // =====================================================================
+  private fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        resolve(dataUrl.substring(dataUrl.indexOf(',') + 1));
+      };
+      reader.onerror = err => reject(err);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  private bareFileName(path: string): string {
+    if (!path) return '';
+    return path.split(/[/\\]/).pop() || path;
+  }
+
+  private extractTextField(field: any): string {
+    if (!field) return '';
+    if (typeof field === 'string') return field;
+    return field.text || field['#text'] || '';
+  }
+
+  /** Ensure missing parsed fields are explicitly null (not empty string) */
+  private normalizeNulls(data: any): any {
+    const result: any = {};
+    for (const key of ['name', 'email', 'phone', 'skills', 'education']) {
+      result[key] = data[key] && data[key] !== '' ? data[key] : null;
+    }
+    result.experience = (data.experience !== undefined && data.experience !== null && data.experience !== '')
+      ? data.experience
+      : null;
+    return result;
   }
 }
